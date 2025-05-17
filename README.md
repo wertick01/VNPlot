@@ -17,6 +17,8 @@ The code/program accepts a file or files from a folder (csv, csv, xls, xlsx tabu
 | 27.5391   | 33.9185    | 34.3822    | 35.3457    | 36.3479    | 30.2611| 1.2193    |
 | 31.0484   | 37.5901    | 35.2967    | 38.5979    | 38.5581    | 33.1895| 0.4064    |
 
-where X is the concentration of the antibody in each titration
+where X is the concentration of the antibody in each titration.
+
+For the example watch file all_release_version.ipynb
 
 1. Loes AN, Tarabi RAL, Huddleston J, Touyon L, Wong SS, Cheng SMS, Leung NHL, Hannon WW, Bedford T, Cobey S, Cowling BJ, Bloom JD.2024.High-throughput sequencing-based neutralization assay reveals how repeated vaccinations impact titers to recent human H1N1 influenza strains. J Virol98:e00689-24.https://doi.org/10.1128/jvi.00689-24
