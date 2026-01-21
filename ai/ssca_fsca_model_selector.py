@@ -8,6 +8,7 @@ from sklearn.neighbors import KDTree
 import joblib
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from typing import Dict, Any, Iterable
 
 class FlowDBSCANSelector:
     """
@@ -384,61 +385,84 @@ class DBSCANModelManager:
 
     def predict_files_with_fallback(
         self,
-        file_paths,
-        model_names,
-        x_col="FSC-A",
-        y_col="SSC-A",
-        out_dir="filtered_results",
-        min_rows=10_000,
-        min_frac=0.75
+        files_dict: Dict[str, pd.DataFrame],
+        model_names: Iterable[str],
+        x_col: str = "FSC-A",
+        y_col: str = "SSC-A",
+        out_dir: str = "filtered_results",
+        min_rows: int = 10_000,
+        min_frac: float = 0.75
     ):
         """
+        Обработка словаря файлов {file_name: DataFrame} с той же логикой выбора модели и fallback'ом.
         model_names: список из трёх моделей по приоритету [primary, backup1, backup2]
         min_frac: минимальная доля выбранных точек, ниже которой переключаемся на резервную модель
+        Результаты сохраняются в out_dir/<x_col.lower()>_<y_col.lower()>/ с суффиксом "_1.parquet".
+        Возвращает summary DataFrame и также сохраняет summary.csv в out_dir.
         """
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
 
+        # папка для parquet-ов, например "fsc-a_ssc-a"
+        subfolder_name = f"{x_col.lower()}_{y_col.lower()}"
+        parquet_dir = out_dir / subfolder_name
+        parquet_dir.mkdir(parents=True, exist_ok=True)
+
         summary_rows = []
 
-        for fp in tqdm(file_paths, desc="Processing files", unit="file"):
-            fp = Path(fp)
+        for file_name, df in tqdm(list(files_dict.items()), desc="Processing files", unit="file"):
             try:
-                df = pd.read_parquet(fp)
+                # если на входе не DataFrame, попытаться прочитать (на всякий случай)
+                if not isinstance(df, pd.DataFrame):
+                    # ожидание: значение либо уже DataFrame, либо путь/буфер, который можно прочитать
+                    try:
+                        df = pd.read_parquet(df)
+                    except Exception as e:
+                        print(f"Skipped {file_name}: value is not a DataFrame and cannot be read as parquet ({e})")
+                        continue
             except Exception as e:
-                print(f"Failed to read {fp}: {e}")
+                print(f"Failed to prepare DataFrame for {file_name}: {e}")
                 continue
 
             total_rows = len(df)
             if total_rows < min_rows:
+                # пропустить слишком маленькие файлы
                 continue
 
             df_filtered = None
-            frac_selected = 0
+            frac_selected = 0.0
             used_model = None
 
+            # пробуем модели по приоритету
             for model_name in model_names:
                 df_filtered_candidate, labels = self.predict_df(model_name, df, x_col, y_col)
-                frac_selected = len(df_filtered_candidate) / total_rows
+                # защитимся от деления на ноль (хотя total_rows > 0 по проверке выше)
+                frac_selected = (len(df_filtered_candidate) / total_rows) if total_rows > 0 else 0.0
                 if frac_selected >= min_frac:
                     df_filtered = df_filtered_candidate
                     used_model = model_name
                     break
 
+            # если ни одна модель не прошла по доле, взять последнюю (fallback)
             if df_filtered is None:
-                # fallback на последнюю модель
                 df_filtered, labels = self.predict_df(model_names[-1], df, x_col, y_col)
                 used_model = model_names[-1]
-                frac_selected = len(df_filtered) / total_rows
+                frac_selected = (len(df_filtered) / total_rows) if total_rows > 0 else 0.0
 
+            # ещё одна проверка на минимальное число строк после фильтрации
             if len(df_filtered) < min_rows:
                 continue
 
-            out_fp = out_dir / f"{fp.stem}_1.parquet"
-            df_filtered.to_parquet(out_fp)
+            # сохранить parquet в подпапку
+            out_fp = parquet_dir / f"{Path(file_name).stem}_1.parquet"
+            try:
+                df_filtered.to_parquet(out_fp)
+            except Exception as e:
+                print(f"Failed to save filtered parquet for {file_name} to {out_fp}: {e}")
+                continue
 
             summary_rows.append({
-                "file": str(fp),
+                "file": str(file_name),
                 "total_rows": total_rows,
                 "selected_rows": len(df_filtered),
                 "frac_selected": frac_selected,
